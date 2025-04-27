@@ -24,6 +24,7 @@
 from pyannote.audio import Pipeline, Audio
 import torch
 import base64
+import traceback
 
 
 class EndpointHandler:
@@ -39,30 +40,35 @@ class EndpointHandler:
         self._io = Audio()
 
     def __call__(self, data):
-        inputs = data.pop("inputs", data)
-        if not isinstance(inputs, str):
-            # Handle cases where "inputs" key is missing or its value isn't a string
-            err_msg = "Request JSON must contain 'inputs' key with a base64 encoded string."
-            print(f"HANDLER ERROR: {err_msg} - Received data type: {type(inputs)}")
-            return {"error": err_msg}
-
-        audio_bytes = base64.b64decode(inputs.encode('utf-8'))
-        audio_io = io.BytesIO(audio_bytes)
-
-        waveform, sample_rate = self._io({"audio": audio_io})
-
-        parameters = data.pop("parameters", dict())
-        diarization = self.pipeline(
-            {"waveform": waveform, "sample_rate": sample_rate}, **parameters
-        )
-
-        processed_diarization = [
-            {
-                "speaker": speaker,
-                "start": f"{turn.start:.3f}",
-                "end": f"{turn.end:.3f}",
-            }
-            for turn, _, speaker in diarization.itertracks(yield_label=True)
-        ]
-
-        return {"diarization": processed_diarization}
+        try:
+            inputs = data.pop("inputs", data)
+            if not isinstance(inputs, str):
+                # Handle cases where "inputs" key is missing or its value isn't a string
+                err_msg = "Request JSON must contain 'inputs' key with a base64 encoded string."
+                print(f"HANDLER ERROR: {err_msg} - Received data type: {type(inputs)}")
+                return {"error": err_msg}
+    
+            audio_bytes = base64.b64decode(inputs.encode('utf-8'))
+            audio_io = io.BytesIO(audio_bytes)
+    
+            waveform, sample_rate = self._io({"audio": audio_io})
+    
+            parameters = data.pop("parameters", dict())
+            diarization = self.pipeline(
+                {"waveform": waveform, "sample_rate": sample_rate}, **parameters
+            )
+    
+            processed_diarization = [
+                {
+                    "speaker": speaker,
+                    "start": f"{turn.start:.3f}",
+                    "end": f"{turn.end:.3f}",
+                }
+                for turn, _, speaker in diarization.itertracks(yield_label=True)
+            ]
+    
+            return {"diarization": processed_diarization}
+        except Exception as e:
+            print(f"HANDLER ERROR: Exception during processing: {e}")
+            traceback.print_exc() # Print full traceback to endpoint logs
+            return {"error": f"Failed during processing: {str(e)}"}
